@@ -3,7 +3,7 @@
 #### 概述
 随着EOS DAPP生态的爆发，引发了各种合约安全事件，主要以菠菜游戏为主，EOS俨然成为黑客的提款机，现在我们就来盘点一下。以下数据来自IMEOS的数据分析报告：
 
-| 字段名        | DApp名称          | 漏洞细节|      损失EOS  |
+| 时间        | DApp名称          | 漏洞细节|      损失EOS  |
 | ---------- | ----------- |----| ------------------------------ |
 | 7.25| 狼人游戏 | 底层asset结构体存在缺陷，导致出现溢出| 60686|
 | 8.26| EOSBET| RAM被恶意合约吞噬|未知|
@@ -24,7 +24,7 @@
 |11.04|EOSDICE|随机数被攻破|2545|
 |11.04|EOSeven|内部成员进行大额转账，抛售SVN|
 
-这些漏洞大部分是由于程序员的疏忽或者对eos合约的原理不熟悉导致的，归纳起来可以分为几类：数据溢出，RAM被合约吞噬，假币，假转账通知，随机数破击，失败回滚。RAM被合约吞噬，是项目方故意为之，不属于漏洞。这里之所以列出来主要是为了让更多人了解EOS的内存消耗机智。
+这些漏洞大部分是由于程序员的疏忽或者对eos合约的原理不熟悉导致的，归纳起来可以分为几类：数据溢出，RAM被合约吞噬，假币，假转账通知，失败回滚，随机数破击，。RAM被合约吞噬，是项目方故意为之，不属于漏洞。这里之所以列出来主要是为了让更多人了解EOS的内存消耗机智。
 
 ####  数据溢出
 
@@ -55,7 +55,8 @@
    ...
 }
 ```
-只要有了用户授权，合约就可以消耗用户的RAM来存数据。这里顺便提一下，为什么往一个没有某种token的账号转账时消耗的是转出者的RAM。下面是token的合约，可以看到当转入的账号在数据库中不存在时，调用emplace函数，ram_payer是转出者账号。n（ram_payer不可能是转入者账号，因为转账操作没有转入者的授权）
+只要有了用户授权，合约就可以消耗用户的RAM来存数据。这里顺便提一下，为什么往一个没有某种token的账号转账时消耗的是转出者的RAM。下面是token的合约，可以看到当转入的账号在数据库中不存在时，调用emplace函数，ram_payer是转出者账号。n（ram_payer不可能是转入者账号，因为转账操作没有转入者的授权。完整的token代码[https://github.com/liyue201/eos-security/tree/master/eosio.token](https://github.com/liyue201/eos-security/tree/master/eosio.token)）
+
 ```
 void token::add_balance( account_name owner, asset value, const currency_stats& st, account_name ram_payer )
 {
@@ -92,6 +93,93 @@ void token::sub_balance( account_name owner, asset value, const currency_stats& 
 所以EOS不适合大量空投token，因为要消耗项目方的RAM。当然项目方也想到了解决办法，就是让用户自己领空投。具体就就是在代币合约上增加一个action，用户调用该action领取token，因为这时已经取得用户的授权，所以就可以使用用户的RAM来存数据。项目方若是想作恶，可以在转账的action或者领空投的action中增加一些代码，存大量数据，大量消耗用户的RAM。
 
 ### 假币漏洞
-在说这个
+EOS的token由两个要素构成即发行合约（contract）、符号（symbol）。比如真正的EOS合约是eosio.token,符号是EOS。一个假币漏洞的例子是黑客发行了一个token，他的符号也叫EOS，然后他拿这个假的EOS去交易所购买别的token，交易所没有校验发行的contract是否是eosio.token，把它当成了真的EOS。对于合约怎么防止这种漏洞，这里放到下一个内容假转账通知一起讲。
+
+### 假转账通知
+EOS中一个合约触发另外一个合约有两种方式，一个是直接调合约的action,另一个是使用require_recipient通知。一般在token合约的转账函数tranfer里面，会调用require_recipient，通知转出者和接收者。若转出者或接收者是合约账号，就可以收到通知，做进一步处理。
+
+```
+void token::transfer( account_name from,
+                      account_name to,
+                      asset        quantity,
+                      string       /*memo*/ )
+{
+    eosio_assert( from != to, "cannot transfer to self" );
+    require_auth( from );
+    eosio_assert( is_account( to ), "to account does not exist");
+    auto sym = quantity.symbol.name();
+    stats statstable( _self, sym );
+    const auto& st = statstable.get( sym );
+
+    require_recipient( from );
+    require_recipient( to );
+
+    eosio_assert( quantity.is_valid(), "invalid quantity" );
+    eosio_assert( quantity.amount > 0, "must transfer positive quantity" );
+    eosio_assert( quantity.symbol == st.supply.symbol, "symbol precision mismatch" );
+
+
+    sub_balance( from, quantity, st );
+    add_balance( to, quantity, st, from );
+}
+```
+
+一般去中心化交易所或者菠菜游戏的合约代码大概是这么写的，在on _transfer中处理转账通知。代码中的两处注释就是防止假转账通知和假币。
+若没有注释1中的判断，黑客可以写一个合约，用他的另外一个账号给他的合约转账，在他的合约里面调require_recipient通知我们的合约。我们的合约就以为给我们转账，实际上他的to并不是我们的合约。
+
+```
+class game : public contract {
+public:
+    game(account_name self)
+    {
+    }
+    void test()
+    {
+    }
+    void on_transfer(const currency::transfer& t, account_name code)
+    {
+        require_auth(t.from);
+
+        //1. 判断假转账通知
+        if (t.from == _self || t.to != _self) {
+            return;
+        }
+
+        //2. 判断是否是假币
+        if (code != N(eosio.token) && t.quantity.symbol == S(4, EOS))
+        {
+           return;
+        }
+
+        eosio_assert(t.quantity.is_valid(), "invalid quantity");
+    }
+
+    void apply(account_name code, account_name action)
+    {
+        if (action == N(transfer)) {
+            on_transfer(unpack_action_data<currency::transfer>(), code);
+            return;
+        }
+
+        if (code != _self)
+            return;
+
+        auto& thiscontract = *this;
+        switch (action) {
+            EOSIO_API(game, (test));
+        };
+    }
+};
+
+extern "C" {
+[[noreturn]] void apply(uint64_t receiver, uint64_t code, uint64_t action) {
+    game app(receiver);
+    app.apply(code, action);
+    eosio_exit(0);
+}
+}
+```
+
+### 失败回滚
 
 
