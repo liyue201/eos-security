@@ -127,7 +127,7 @@ void token::transfer( account_name from,
 一般去中心化交易所或者菠菜游戏的合约代码大概是这么写的，在on _transfer中处理转账通知。代码中的两处注释就是防止假转账通知和假币。
 若没有注释1中的判断，黑客就可以写一个攻击合约，用他的另外一个账号给他的攻击合约转账，在他的合约里面调require_recipient通知我们的合约。我们的合约以为给我们转账，实际上他的to并不是我们的合约。
 
-```
+```CPP
 class game : public contract {
 public:
     game(account_name self)
