@@ -28,7 +28,7 @@
 
 ####  数据溢出
 
-这个话题没什么好讲的，任何一个有素养的程序员都知道怎么回事。这里想说的是，eos库中的很多类都实现了运算符重载，重载函数中进行了溢出判断，比如asset类。所以尽量用重载函数运算。 下面是asset乘以一个int64_t的重载函数。
+这个话题没什么好讲的，任何一个有素养的程序员都知道怎么回事。这里想说的是，eos库中的很多类都实现了运算符重载，并在重载函数中做了溢出判断，比如asset类。所以尽量用重载函数运算。 下面是asset乘以一个int64_t的重载函数。
 
 ```CPP
   asset& operator*=( int64_t a ) {
@@ -41,7 +41,7 @@
 ```
 
 #### RAM被合约吞噬
-什么鬼，用户的RAM怎么能被合约吞噬！这个得从eos数据库说起。eos数据库跟我们传统的数据库不太一样，传统的数据库大部分数据是放在磁盘上面的，所以不消耗太多RAM（当然也有一些内存数据库），而EOS的数据库的数据是全部在RAM中的。内存数据库的好处当然是为了更快的读写速度。eos提供了一个类multi_index来使用数据库，对于合约来说，我们不是直接操作数据库，而是操作这个类。 合约要保存数据，必然需要消耗一定的RAM。所以在multi_index的插入数据emplace和修改数据modify函数中的第一个参数指定了RAM的支付者payer。
+什么鬼，用户的RAM怎么能被合约吞噬！这个得从eos数据库说起。eos数据库跟我们传统的数据库不太一样，传统的数据库大部分数据是放在磁盘上面的，所以不用消耗太多的RAM（当然也有一些内存数据库），而EOS的数据库的数据是全部在内存中的。内存数据库的好处当然是为了更快的读写速度。eos提供了一个类multi_index来使用数据库，对于合约来说，我们不是直接操作数据库，而是操作这个类。合约要保存数据，必然需要消耗一定的RAM。所以在multi_index的插入数据emplace和修改数据modify函数中的第一个参数指定了RAM的支付者payer。
 
 ```CPP
   template<typename Lambda>
@@ -55,7 +55,7 @@
    ...
 }
 ```
-只要有了用户授权，合约就可以消耗用户的RAM来存数据。这里顺便提一下，为什么往一个没有某种token的账号转账时消耗的是转出者的RAM。下面是token的合约，可以看到当转入的账号在数据库中不存在时，调用emplace函数，ram_payer是转出者账号。n（ram_payer不可能是转入者账号，因为转账操作没有转入者的授权。完整的token代码[https://github.com/liyue201/eos-security/tree/master/eosio.token](https://github.com/liyue201/eos-security/tree/master/eosio.token)）
+只要有了用户授权，合约就可以消耗用户的RAM来存数据。这里顺便提一下，为什么往一个没有某种token的账号转账时消耗的是转出者的RAM。下面是token的合约，可以看到当转入的账号在数据库中不存在时，调用emplace函数，ram_payer是转出者账号。（ram_payer不可能是转入者账号，因为转账操作没有转入者的授权。完整的token代码[https://github.com/liyue201/eos-security/tree/master/eosio.token](https://github.com/liyue201/eos-security/tree/master/eosio.token)）
 
 ```CPP
 void token::add_balance( account_name owner, asset value, const currency_stats& st, account_name ram_payer )
@@ -90,10 +90,10 @@ void token::sub_balance( account_name owner, asset value, const currency_stats& 
    }
 }
 ```
-所以EOS不适合大量空投token，因为要消耗项目方的RAM。当然项目方也想到了解决办法，就是让用户自己领空投。具体就就是在代币合约上增加一个action，用户调用该action领取token，因为这时已经取得用户的授权，所以就可以使用用户的RAM来存数据。项目方若是想作恶，可以在转账的action或者领空投的action中增加一些代码，存大量数据，大量消耗用户的RAM。
+所以EOS不适合大量空投token，因为要消耗项目方的RAM。当然项目方也想到了解决办法，就是让用户自己去领空投。具体就是在代币合约上增加一个action，用户调用该action领取token。因为这时已经取得用户的授权，所以就可以使用用户的RAM来存数据。项目方若是想作恶，可以在转账或者领空投的action中增加一些代码，存储大量数据，大量消耗用户的RAM。
 
 ### 假币漏洞
-EOS的token由两个要素构成即发行合约（contract）、符号（symbol）。比如真正的EOS合约是eosio.token,符号是EOS。一个假币漏洞的例子是黑客发行了一个token，他的符号也叫EOS，然后他拿这个假的EOS去交易所购买别的token，交易所没有校验发行的contract是否是eosio.token，把它当成了真的EOS。对于合约怎么防止这种漏洞，这里放到下一个内容假转账通知一起讲。
+EOS的token由两个要素构成，即发行合约（contract）和符号（symbol）。比如真正的EOS合约是eosio.token,符号是EOS。一个假币漏洞的例子是黑客发行了一个token，它的符号也叫EOS，然后他拿这个假的EOS去交易所购买别的token，交易所没有校验发行的contract是否是eosio.token，把它当成了真的EOS。对于合约怎么防止这种漏洞，请看下一个内容假转账通知。
 
 ### 假转账通知
 EOS中一个合约触发另外一个合约有两种方式，一个是直接调合约的action,另一个是使用require_recipient通知。一般在token合约的转账函数tranfer里面，会调用require_recipient，通知转出者和接收者。若转出者或接收者是合约账号，就可以收到通知，做进一步处理。
@@ -125,7 +125,7 @@ void token::transfer( account_name from,
 ```
 
 一般去中心化交易所或者菠菜游戏的合约代码大概是这么写的，在on _transfer中处理转账通知。代码中的两处注释就是防止假转账通知和假币。
-若没有注释1中的判断，黑客可以写一个合约，用他的另外一个账号给他的合约转账，在他的合约里面调require_recipient通知我们的合约。我们的合约以为给我们转账，实际上他的to并不是我们的合约。
+若没有注释1中的判断，黑客就可以写一个攻击合约，用他的另外一个账号给他的攻击合约转账，在他的合约里面调require_recipient通知我们的合约。我们的合约以为给我们转账，实际上他的to并不是我们的合约。
 
 ```
 class game : public contract {
@@ -181,14 +181,14 @@ extern "C" {
 ```
 
 ### 失败回滚
-早期有一些骰子游戏逻辑是这样的，合约收到玩家的下注后，立即在合约内部根据区块随机数据还有时间戳等一些信息作为种子，生成随机数，判断输赢，若赢则立即给玩家转账。这种设计主要是因为初学者对eos合约的运行原理不熟悉导致的。eos一个transaction可以包含多个action，只要其中一个action运行失败，整个transaction都会失败，可以类比数据库的事务。黑客可以利用这个原理，实现这样一个攻击合约。代码如下：
+早期有一些骰子游戏逻辑是这样的，合约收到玩家的下注后，立即在合约内部根据区块随机数据还有时间戳等一些信息作为种子，生成随机数，判断输赢，若赢则立即给玩家转账。这种设计主要是因为初学者对eos合约的运行原理不熟悉导致的。eos一个transaction可以包含多个action，只要其中一个action运行失败，整个transaction都会失败，类似数据库的事务。黑客可以利用这个原理，实现这样一个攻击合约。代码如下：
 
 ```CPP
 class mycontract : public eosio::contract
 {
 public:
-
-  void attack() {
+  void attack()
+  {
     //1: 读自己账号的余额
     uint64_t old_balance = getBalance();
 
@@ -199,7 +199,8 @@ public:
     SEND_INLINE_ACTION(*this, attackafter, {_self, N(active)}, {old_balance});
   }
 
-  void attackafter(uint64_t old_balance){
+  void attackafter(uint64_t old_balance)
+  {
       if (old_balance > getBalance()) {
            //输了，终止action，回滚之前的操作
            eosio_assert(0,  "lose");
@@ -207,14 +208,44 @@ public:
   }
 };
 ```
-黑客写了两个action，第一个先读自己合约账号的余额，再去调用游戏合约下注，最后触发一个action，也就是上面的attackafter，再读一次余额。如果余额减少那肯定是输了，这时只要终止这个action，前面的action也都会失败，相当于没有下注，黑客的eos并有损失。只有赢的时候，整个trasaction才会执行。黑客用这个合约下注就可以做到只赢不输。有些人可能会问，这里为什么要单独写attackafter这个action，而不是在attack函数中直接读处理。原因是eos合约的action都是异步的，这里一共3个action，在步骤2中调用合约的action不是立即执行，它要等到attack执行完才执行，所以在attack中读到的余额还是原来那个。attackafter是最后执行的action，当然能读到改变后的余额。后来的骰子游戏几乎都改成延后开奖的模式了，即玩家投注之后，在由合约或者中心服务器执行另外一个transation开奖。 但这并不意味着绝对安全，于是又有了重放攻击。
+黑客写了两个action，第一个先读自己合约账号的余额，再去调用游戏合约下注，最后触发另一个action，也就是上面的attackafter，再读一次余额。如果余额减少那肯定是输了，这时只要终止这个action，前面的action也都会失败，相当于没有下注，黑客的eos并有损失。只有赢的时候，整个transaction才会执行。黑客用这个合约下注就可以做到只赢不输。有些人可能会问，这里为什么要单独写attackafter这个action，而不是在attack函数中直接读处理。原因是eos合约的action都是异步执行的，这里一共3个action，在步骤2中调用合约的action不是立即执行，它要等到attack执行完才执行，所以在attack中读到的余额还是原来那个。attackafter是最后执行的action，当然能读到改变后的余额。后来的骰子游戏几乎都改成延后开奖的模式了，即玩家投注之后，再由合约或者中心服务器触发另外一个transation开奖。 但这并不意味着绝对安全，于是又有了重放攻击。
 
 ### 重放攻击
 黑客生成随机种子使用攻击合约小额下注，若赢了，开奖的action中会给攻击合约转账，这时攻击合约拒绝这个action执行，只需加一行代码eosio_assert(0,  "lose")，于是开奖失败。黑客再用这个随机种子大额下注。这类漏洞是因为随机种子使用次数的限制没处理好。
 
-### 拒绝收款
-拒绝收款和重放攻击类似。一个例子是WORLD CONQUES，黑客利用游戏缴税规则，拒绝后续的买家，导致游戏非正常结束。
 
+### 拒绝收款
+拒绝收款和重放攻击类似。一个例子是WORLD CONQUES，黑客利用游戏缴税规则，拒绝后续的买家，导致游戏非正常结束。拒绝收款的合约大概是这样的
+
+```CPP
+class mycontract : public contract {
+public:
+    void on_transfer(const currency::transfer& t, account_name code)
+    {
+        if (t.to == _self)
+        {
+            //拒绝任何人给我转账
+            eosio_assert(0, "");
+        }
+    }
+
+    void apply(account_name code, account_name action)
+    {
+        if (action == N(transfer)) {
+            on_transfer(unpack_action_data<currency::transfer>(), code);
+            return;
+        }
+    }
+};
+
+extern "C" {
+[[noreturn]] void apply(uint64_t receiver, uint64_t code, uint64_t action) {
+    mycontract app(receiver);
+    app.apply(code, action);
+    eosio_exit(0);
+}
+}
+```
 
 ### 随机数攻破
 BM提出了一个随机数方案，关于它的原理网上已经有很多了，这里就不重复了。那些随机数被攻破的项目自己反省一下。首先随机种子最好不要用链上的数据了，你能拿到的数据，别人都能拿到。
