@@ -43,13 +43,13 @@
 #### RAM被合约吞噬
 什么鬼，用户的RAM怎么能被合约吞噬！这个得从eos数据库说起。eos数据库跟我们传统的数据库不太一样，传统的数据库大部分数据是放在磁盘上面的，所以不消耗太多RAM（当然也有一些内存数据库），而EOS的数据库的数据是全部在RAM中的。内存数据库的好处当然是为了更快的读写速度。eos提供了一个类multi_index来使用数据库，对于合约来说，我们不是直接操作数据库，而是操作这个类。 合约要保存数据，必然需要消耗一定的RAM。所以在multi_index的插入数据emplace和修改数据modify函数中的第一个参数指定了RAM的支付者payer。
 
-```
+```CPP
   template<typename Lambda>
   const_iterator emplace( uint64_t payer, Lambda&& constructor ) {
     ...
 }
 ```
-```
+```CPP
  template<typename Lambda>
   void modify( const T& obj, uint64_t payer, Lambda&& updater ){
    ...
@@ -57,7 +57,7 @@
 ```
 只要有了用户授权，合约就可以消耗用户的RAM来存数据。这里顺便提一下，为什么往一个没有某种token的账号转账时消耗的是转出者的RAM。下面是token的合约，可以看到当转入的账号在数据库中不存在时，调用emplace函数，ram_payer是转出者账号。n（ram_payer不可能是转入者账号，因为转账操作没有转入者的授权。完整的token代码[https://github.com/liyue201/eos-security/tree/master/eosio.token](https://github.com/liyue201/eos-security/tree/master/eosio.token)）
 
-```
+```CPP
 void token::add_balance( account_name owner, asset value, const currency_stats& st, account_name ram_payer )
 {
    accounts to_acnts( _self, owner );
@@ -74,7 +74,7 @@ void token::add_balance( account_name owner, asset value, const currency_stats& 
 }
 ```
 代币转走完了之后，从数据库中删除改账号，RAM会归还用户。
-```
+```CPP
 void token::sub_balance( account_name owner, asset value, const currency_stats& st ) {
    accounts from_acnts( _self, owner );
 
@@ -98,7 +98,7 @@ EOS的token由两个要素构成即发行合约（contract）、符号（symbol�
 ### 假转账通知
 EOS中一个合约触发另外一个合约有两种方式，一个是直接调合约的action,另一个是使用require_recipient通知。一般在token合约的转账函数tranfer里面，会调用require_recipient，通知转出者和接收者。若转出者或接收者是合约账号，就可以收到通知，做进一步处理。
 
-```
+```CPP
 void token::transfer( account_name from,
                       account_name to,
                       asset        quantity,
@@ -183,7 +183,7 @@ extern "C" {
 ### 失败回滚
 早期有一些骰子游戏逻辑是这样的，合约收到玩家的下注后，立即在合约内部根据区块随机数据还有时间戳等一些信息作为种子，生成随机数，判断输赢，若赢则立即给玩家转账。这种设计主要是因为初学者对eos合约的运行原理不熟悉导致的。eos一个transaction可以包含多个action，只要其中一个action运行失败，整个transaction都会失败，可以类比数据库的事务。黑客可以利用这个原理，实现这样一个攻击合约。代码如下：
 
-```
+```CPP
 class mycontract : public eosio::contract
 {
 public:
@@ -207,19 +207,23 @@ public:
   }
 };
 ```
-黑客写了两个action，第一个先读自己合约账号的余额，在去调用游戏合约下注，最后触发一个action，也就是上面的attackafter，再读一次余额。如果余额减少那肯定是输了，这时只要终止这个action，前面的action也都会失败，相当于没有下注，黑客的eos并有损失。只有赢的时候，整个trasaction才会执行。黑客用这个合约下注就可以做到只赢不输。
+黑客写了两个action，第一个先读自己合约账号的余额，再去调用游戏合约下注，最后触发一个action，也就是上面的attackafter，再读一次余额。如果余额减少那肯定是输了，这时只要终止这个action，前面的action也都会失败，相当于没有下注，黑客的eos并有损失。只有赢的时候，整个trasaction才会执行。黑客用这个合约下注就可以做到只赢不输。有些人可能会问，这里为什么要单独写attackafter这个action，而不是在attack函数中直接读处理。原因是eos合约的action都是异步的，这里一共3个action，在步骤2中调用合约的action不是立即执行，它要等到attack执行完才执行，所以在attack中读到的余额还是原来那个。attackafter是最后执行的action，当然能读到改变后的余额。后来的骰子游戏几乎都改成延后开奖的模式了，即玩家投注之后，在由合约或者中心服务器执行另外一个transation开奖。 但这并不意味着绝对安全，于是又有了重放攻击。
 
 ### 重放攻击
-
+黑客生成随机种子使用攻击合约小额下注，若赢了，开奖的action中会给攻击合约转账，这时攻击合约拒绝这个action执行，只需加一行代码eosio_assert(0,  "lose")，于是开奖失败。黑客再用这个随机种子大额下注。这类漏洞是因为随机种子使用次数的限制没处理好。
 
 ### 拒绝收款
+拒绝收款和重放攻击类似。一个例子是WORLD CONQUES，黑客利用游戏缴税规则，拒绝后续的买家，导致游戏非正常结束。
 
 
 ### 随机数攻破
+BM提出了一个随机数方案，关于它的原理网上已经有很多了，这里就不重复了。那些随机数被攻破的项目自己反省一下。首先随机种子最好不要用链上的数据了，你能拿到的数据，别人都能拿到。
 
+### EOS合约都是开源的
+你以为你的合约不开源就是安全的，但还是被攻击了。因为在黑客的眼里你的合约就是开源的。由于区块链的公开透明的特性，区块链上的数据所有人都能获取。EOS合约使用C++编写，编译成WASM格式部署，可以从区块链浏览器上拿到，再用一个工具将WASM转换成WAST格式。WAST是一种可读性良好的编程语言，是要稍加学习，就能读懂，再翻译成C++也不是难事。所以千万不要把私钥之类的重要信息放在合约代码里。这里推荐两个在线工具
 
-### 合约都是开源的
-
+* C++转WAST工具https://wasdk.github.io/WasmFiddle/
+* WASM转WAST工具https://webassembly.github.io/wabt/demo/wasm2wat/
 
 
 
