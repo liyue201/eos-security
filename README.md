@@ -9,7 +9,8 @@
 - [拒绝收款](#refuse)
 - [随机数攻破](#random)
 - [EOS合约都是开源的](#open)
-- [EOS可逆区块](#block)
+- [onchain调用](#onchain)
+- [EOS不可逆块](#block)
 
 
 ####  <a name="introduction">概述</a>
@@ -268,14 +269,16 @@ BM提出了一个随机数方案，关于它的原理网上已经有很多了，
 * C++转WAST工具https://wasdk.github.io/WasmFiddle/
 * WASM转WAST工具https://webassembly.github.io/wabt/demo/wasm2wat/
 
+#### <a name="onchain"> onchain调用 </a>
 
-#### <a name="block">EOS可逆区块</a>
+EOS ABI文件不是必须的，ABI只是合约的接口描述文件，就算不部署，也用被其他合约调用。
+
+#### <a name="block">EOS不可逆块</a>
 EOS不可逆区块数大约335个，按0.5s出一个块，相当于167s。具体的原理可以参考这里：
 
 * http://blog.eosdata.io/index.php/2018/09/21/guan-yu-eos-bu-ke-ni-kuai/
 
 对于中心化或者伪中心化交易所，比如newdex这类链下撮合的交易所，需要考虑区块可逆的情况，收到转账后需要等待一定的区块数确认才算真正收到。若是完全去中心化交易所（链上撮合，链上结算的交易所）则不用考虑。
-
 
 
 
