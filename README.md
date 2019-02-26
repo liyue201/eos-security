@@ -1,7 +1,5 @@
 # EOS智能合约安全
  
- 11
- 
 ## 目录
 - [概述](#introduction)
 - [数据溢出](#overflow)
